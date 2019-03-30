@@ -528,6 +528,17 @@ stretch(SDL_Surface *src, SDL_Surface *dst)
     }
 }
 
+static int
+_pg_IntFromObjWithError(PyObject *obj, int *val)
+{
+    if (pg_IntFromObj(obj, val) == 0) {
+        PyErr_SetString(PyExc_TypeError,
+                        "argument must be numeric");
+        return 0;
+    }
+    return 1;
+}
+
 static PyObject *
 surf_scale(PyObject *self, PyObject *arg)
 {
@@ -537,8 +548,10 @@ surf_scale(PyObject *self, PyObject *arg)
     surfobj2 = NULL;
 
     /*get all the arguments*/
-    if (!PyArg_ParseTuple(arg, "O!(ii)|O!", &pgSurface_Type, &surfobj, &width,
-                          &height, &pgSurface_Type, &surfobj2))
+    if (!PyArg_ParseTuple(arg, "O!(O&O&)|O!", &pgSurface_Type, &surfobj,
+                          _pg_IntFromObjWithError, &width,
+                          _pg_IntFromObjWithError, &height,
+                          &pgSurface_Type, &surfobj2))
         return NULL;
 
     if (width < 0 || height < 0)
@@ -1419,8 +1432,10 @@ surf_scalesmooth(PyObject *self, PyObject *arg)
     surfobj2 = NULL;
 
     /*get all the arguments*/
-    if (!PyArg_ParseTuple(arg, "O!(ii)|O!", &pgSurface_Type, &surfobj, &width,
-                          &height, &pgSurface_Type, &surfobj2))
+    if (!PyArg_ParseTuple(arg, "O!(O&O&)|O!", &pgSurface_Type, &surfobj,
+                          _pg_IntFromObjWithError, &width,
+                          _pg_IntFromObjWithError, &height,
+                          &pgSurface_Type, &surfobj2))
         return NULL;
 
     if (width < 0 || height < 0)
