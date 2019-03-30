@@ -529,11 +529,12 @@ stretch(SDL_Surface *src, SDL_Surface *dst)
 }
 
 static int
-_pg_IntFromObjWithError(PyObject *obj, int *val)
+_pg_TwoIntsArrayFromObjWithError(PyObject *obj, int *vals)
 {
-    if (pg_IntFromObj(obj, val) == 0) {
+    if (pg_TwoIntsFromObj(obj, &vals[0], &vals[1]) == 0) {
         PyErr_SetString(PyExc_TypeError,
-                        "argument must be numeric");
+                        "argument must be a sequence of two "
+                        "numeric values");
         return 0;
     }
     return 1;
@@ -544,15 +545,18 @@ surf_scale(PyObject *self, PyObject *arg)
 {
     PyObject *surfobj, *surfobj2;
     SDL_Surface *surf, *newsurf;
+    int size[2];
     int width, height;
     surfobj2 = NULL;
 
     /*get all the arguments*/
-    if (!PyArg_ParseTuple(arg, "O!(O&O&)|O!", &pgSurface_Type, &surfobj,
-                          _pg_IntFromObjWithError, &width,
-                          _pg_IntFromObjWithError, &height,
+    if (!PyArg_ParseTuple(arg, "O!O&|O!", &pgSurface_Type, &surfobj,
+                          _pg_TwoIntsArrayFromObjWithError, size,
                           &pgSurface_Type, &surfobj2))
         return NULL;
+
+    width = size[0];
+    height = size[1];
 
     if (width < 0 || height < 0)
         return RAISE(PyExc_ValueError, "Cannot scale to negative size");
@@ -1428,15 +1432,18 @@ surf_scalesmooth(PyObject *self, PyObject *arg)
 {
     PyObject *surfobj, *surfobj2;
     SDL_Surface *surf, *newsurf;
+    int size[2];
     int width, height, bpp;
     surfobj2 = NULL;
 
     /*get all the arguments*/
-    if (!PyArg_ParseTuple(arg, "O!(O&O&)|O!", &pgSurface_Type, &surfobj,
-                          _pg_IntFromObjWithError, &width,
-                          _pg_IntFromObjWithError, &height,
+    if (!PyArg_ParseTuple(arg, "O!O&|O!", &pgSurface_Type, &surfobj,
+                          _pg_TwoIntsArrayFromObjWithError, size,
                           &pgSurface_Type, &surfobj2))
         return NULL;
+
+    width = size[0];
+    height = size[1];
 
     if (width < 0 || height < 0)
         return RAISE(PyExc_ValueError, "Cannot scale to negative size");
