@@ -828,8 +828,10 @@ surf_get_at(PyObject *self, PyObject *args)
     Uint8 rgba[4] = {0, 0, 0, 255};
 #endif /* IS_SDLv2 */
 
-    if (!PyArg_ParseTuple(args, "(ii)", &x, &y))
-        return NULL;
+    if (!pg_TwoIntsFromObj(args, &x, &y)) {
+        return RAISE(PyExc_TypeError,
+                     "expected a sequence (x, y)");
+    }
     if (!surf)
         return RAISE(pgExc_SDLError, "display Surface quit");
 
@@ -908,14 +910,19 @@ surf_set_at(PyObject *self, PyObject *args)
     SDL_Surface *surf = pgSurface_AsSurface(self);
     SDL_PixelFormat *format = surf->format;
     Uint8 *pixels;
+    PyObject *posobj;
     int x, y;
     Uint32 color;
     Uint8 rgba[4] = {0, 0, 0, 0};
     PyObject *rgba_obj;
     Uint8 *byte_buf;
 
-    if (!PyArg_ParseTuple(args, "(ii)O", &x, &y, &rgba_obj))
+    if (!PyArg_ParseTuple(args, "OO", &posobj, &rgba_obj))
         return NULL;
+    if (!pg_TwoIntsFromObj(posobj, &x, &y)) {
+        return RAISE(PyExc_TypeError,
+                     "expected a sequence (x, y)");
+    }
     if (!surf)
         return RAISE(pgExc_SDLError, "display Surface quit");
 
@@ -991,8 +998,10 @@ surf_get_at_mapped(PyObject *self, PyObject *args)
     Sint32 color;
     Uint8 *pix;
 
-    if (!PyArg_ParseTuple(args, "(ii)", &x, &y))
-        return NULL;
+    if (!pg_TwoIntsFromObj(args, &x, &y)) {
+        return RAISE(PyExc_TypeError,
+                     "expected a sequence (x, y)");
+    }
     if (!surf)
         return RAISE(pgExc_SDLError, "display Surface quit");
 
