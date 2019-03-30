@@ -505,6 +505,17 @@ ellipse(PyObject *self, PyObject *arg)
     return pgRect_New4(l, t, MAX(r - l, 0), MAX(b - t, 0));
 }
 
+static int
+_pg_IntFromObjWithError(PyObject *obj, int *val)
+{
+    if (pg_IntFromObj(obj, val) == 0) {
+        PyErr_SetString(PyExc_TypeError,
+                        "argument must be numeric");
+        return 0;
+    }
+    return 1;
+}
+
 static PyObject *
 circle(PyObject *self, PyObject *arg)
 {
@@ -516,8 +527,12 @@ circle(PyObject *self, PyObject *arg)
     int width = 0, loop;
 
     /*get all the arguments*/
-    if (!PyArg_ParseTuple(arg, "O!O(ii)i|i", &pgSurface_Type, &surfobj,
-                          &colorobj, &posx, &posy, &radius, &width))
+    if (!PyArg_ParseTuple(arg, "O!O(O&O&)i|i",
+                          &pgSurface_Type, &surfobj,
+                          &colorobj,
+                          _pg_IntFromObjWithError, &posx,
+                          _pg_IntFromObjWithError, &posy,
+                          &radius, &width))
         return NULL;
 
     surf = pgSurface_AsSurface(surfobj);
