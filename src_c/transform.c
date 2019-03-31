@@ -528,10 +528,15 @@ stretch(SDL_Surface *src, SDL_Surface *dst)
     }
 }
 
+typedef struct {
+    int w;
+    int h;
+} pgSize;
+
 static int
-_pg_TwoIntsArrayFromObjWithError(PyObject *obj, int *vals)
+_pgSize_FromObjWithError(PyObject *obj, pgSize *vals)
 {
-    if (pg_TwoIntsFromObj(obj, &vals[0], &vals[1]) == 0) {
+    if (pg_TwoIntsFromObj(obj, &vals->w, &vals->h) == 0) {
         PyErr_SetString(PyExc_TypeError,
                         "argument must be a sequence of two "
                         "numeric values");
@@ -545,26 +550,22 @@ surf_scale(PyObject *self, PyObject *arg)
 {
     PyObject *surfobj, *surfobj2;
     SDL_Surface *surf, *newsurf;
-    int size[2];
-    int width, height;
+    pgSize size;
     surfobj2 = NULL;
 
     /*get all the arguments*/
     if (!PyArg_ParseTuple(arg, "O!O&|O!", &pgSurface_Type, &surfobj,
-                          _pg_TwoIntsArrayFromObjWithError, size,
+                          _pgSize_FromObjWithError, &size,
                           &pgSurface_Type, &surfobj2))
         return NULL;
 
-    width = size[0];
-    height = size[1];
-
-    if (width < 0 || height < 0)
+    if (size.w < 0 || size.h < 0)
         return RAISE(PyExc_ValueError, "Cannot scale to negative size");
 
     surf = pgSurface_AsSurface(surfobj);
 
     if (!surfobj2) {
-        newsurf = newsurf_fromsurf(surf, width, height);
+        newsurf = newsurf_fromsurf(surf, size.w, size.h);
         if (!newsurf)
             return NULL;
     }
@@ -572,7 +573,7 @@ surf_scale(PyObject *self, PyObject *arg)
         newsurf = pgSurface_AsSurface(surfobj2);
 
     /* check to see if the size is twice as big. */
-    if (newsurf->w != width || newsurf->h != height)
+    if (newsurf->w != size.w || newsurf->h != size.h)
         return RAISE(PyExc_ValueError,
                      "Destination surface not the given width or height.");
 
@@ -581,7 +582,7 @@ surf_scale(PyObject *self, PyObject *arg)
         return RAISE(PyExc_ValueError,
                      "Source and destination surfaces need the same format.");
 
-    if ((width && height) && (surf->w && surf->h)) {
+    if ((size.w && size.h) && (surf->w && surf->h)) {
         SDL_LockSurface(newsurf);
         pgSurface_Lock(surfobj);
 
@@ -1432,20 +1433,17 @@ surf_scalesmooth(PyObject *self, PyObject *arg)
 {
     PyObject *surfobj, *surfobj2;
     SDL_Surface *surf, *newsurf;
-    int size[2];
-    int width, height, bpp;
+    pgSize size;
+    int bpp;
     surfobj2 = NULL;
 
     /*get all the arguments*/
     if (!PyArg_ParseTuple(arg, "O!O&|O!", &pgSurface_Type, &surfobj,
-                          _pg_TwoIntsArrayFromObjWithError, size,
+                          _pgSize_FromObjWithError, &size,
                           &pgSurface_Type, &surfobj2))
         return NULL;
 
-    width = size[0];
-    height = size[1];
-
-    if (width < 0 || height < 0)
+    if (size.w < 0 || size.h < 0)
         return RAISE(PyExc_ValueError, "Cannot scale to negative size");
 
     surf = pgSurface_AsSurface(surfobj);
@@ -1456,7 +1454,7 @@ surf_scalesmooth(PyObject *self, PyObject *arg)
                      "Only 24-bit or 32-bit surfaces can be smoothly scaled");
 
     if (!surfobj2) {
-        newsurf = newsurf_fromsurf(surf, width, height);
+        newsurf = newsurf_fromsurf(surf, size.w, size.h);
         if (!newsurf)
             return NULL;
     }
@@ -1464,26 +1462,26 @@ surf_scalesmooth(PyObject *self, PyObject *arg)
         newsurf = pgSurface_AsSurface(surfobj2);
 
     /* check to see if the size is twice as big. */
-    if (newsurf->w != width || newsurf->h != height)
+    if (newsurf->w != size.w || newsurf->h != size.h)
         return RAISE(PyExc_ValueError,
                      "Destination surface not the given width or height.");
 
-    if (((width * bpp + 3) >> 2) > newsurf->pitch)
+    if (((size.w * bpp + 3) >> 2) > newsurf->pitch)
         return RAISE(
             PyExc_ValueError,
             "SDL Error: destination surface pitch not 4-byte aligned.");
 
-    if (width && height) {
+    if (size.w && size.h) {
         SDL_LockSurface(newsurf);
         pgSurface_Lock(surfobj);
         Py_BEGIN_ALLOW_THREADS;
 
         /* handle trivial case */
-        if (surf->w == width && surf->h == height) {
+        if (surf->w == size.w && surf->h == size.h) {
             int y;
-            for (y = 0; y < height; y++) {
+            for (y = 0; y < size.h; y++) {
                 memcpy((Uint8 *)newsurf->pixels + y * newsurf->pitch,
-                       (Uint8 *)surf->pixels + y * surf->pitch, width * bpp);
+                       (Uint8 *)surf->pixels + y * surf->pitch, size.w * bpp);
             }
         }
         else {

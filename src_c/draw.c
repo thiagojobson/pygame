@@ -505,10 +505,19 @@ ellipse(PyObject *self, PyObject *arg)
     return pgRect_New4(l, t, MAX(r - l, 0), MAX(b - t, 0));
 }
 
+#if IS_SDLv2
+typedef SDL_Point pgPoint;
+#else
+typedef struct {
+    int x;
+    int y;
+} pgPoint;
+#endif
+
 static int
-_pg_TwoIntsArrayFromObjWithError(PyObject *obj, int *vals)
+_pgPoint_FromObjWithError(PyObject *obj, pgPoint *vals)
 {
-    if (pg_TwoIntsFromObj(obj, &vals[0], &vals[1]) == 0) {
+    if (pg_TwoIntsFromObj(obj, &vals->x, &vals->y) == 0) {
         PyErr_SetString(PyExc_TypeError,
                         "argument must be a sequence of two "
                         "numeric values");
@@ -524,7 +533,7 @@ circle(PyObject *self, PyObject *arg)
     SDL_Surface *surf;
     Uint8 rgba[4];
     Uint32 color;
-    int pos[2];
+    pgPoint pos;
     int radius, t, l, b, r;
     int width = 0, loop;
 
@@ -532,7 +541,7 @@ circle(PyObject *self, PyObject *arg)
     if (!PyArg_ParseTuple(arg, "O!OO&i|i",
                           &pgSurface_Type, &surfobj,
                           &colorobj,
-                          _pg_TwoIntsArrayFromObjWithError, pos,
+                          _pgPoint_FromObjWithError, &pos,
                           &radius, &width))
         return NULL;
 
@@ -553,12 +562,12 @@ circle(PyObject *self, PyObject *arg)
         return NULL;
 
     if (!width) {
-        draw_ellipse(surf, (Sint16)pos[0], (Sint16)pos[1], (Sint16)radius * 2,
+        draw_ellipse(surf, (Sint16)pos.x, (Sint16)pos.y, (Sint16)radius * 2,
                      (Sint16)radius * 2, 1, color);
     }
     else {
         for (loop = 0; loop < width; ++loop) {
-            draw_ellipse(surf, pos[0], pos[1], 2 * (radius - loop),
+            draw_ellipse(surf, pos.x, pos.y, 2 * (radius - loop),
                          2 * (radius - loop), 0, color);
             /* To avoid moiré pattern. Don't do an extra one on the outer
              * ellipse.  We draw another ellipse offset by a pixel, over
@@ -566,7 +575,7 @@ circle(PyObject *self, PyObject *arg)
              * pixels are filled.
              */
             // if (width > 1 && loop > 0)       // removed due to: 'Gaps in circle for width greater than 1 #736'
-            draw_ellipse(surf, pos[0] + 1, pos[1], 2 * (radius - loop),
+            draw_ellipse(surf, pos.x + 1, pos.y, 2 * (radius - loop),
                         2 * (radius - loop), 0, color);
         }
     }
@@ -574,10 +583,10 @@ circle(PyObject *self, PyObject *arg)
     if (!pgSurface_Unlock(surfobj))
         return NULL;
 
-    l = MAX(pos[0] - radius, surf->clip_rect.x);
-    t = MAX(pos[1] - radius, surf->clip_rect.y);
-    r = MIN(pos[0] + radius, surf->clip_rect.x + surf->clip_rect.w);
-    b = MIN(pos[1] + radius, surf->clip_rect.y + surf->clip_rect.h);
+    l = MAX(pos.x - radius, surf->clip_rect.x);
+    t = MAX(pos.y - radius, surf->clip_rect.y);
+    r = MIN(pos.x + radius, surf->clip_rect.x + surf->clip_rect.w);
+    b = MIN(pos.y + radius, surf->clip_rect.y + surf->clip_rect.h);
     return pgRect_New4(l, t, MAX(r - l, 0), MAX(b - t, 0));
 }
 
