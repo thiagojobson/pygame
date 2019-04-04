@@ -1979,55 +1979,105 @@ _vector2_rotate_helper(double *dst_coords, const double *src_coords,
     return 1;
 }
 
+typedef enum {
+    UNITS_UNKNOWN = 0x00,
+    UNITS_DEGREES = 0x01,
+    UNITS_RADIANS = 0x02,
+
+    UNITS_DEFAULT = UNITS_DEGREES
+} pg_angleunits_t;
+
+typedef struct {
+    pg_angleunits_t type;
+    const char *name; /* lowercase */
+} pg_angleunit_def_t;
+
+static pg_angleunit_def_t pg_angleunit_defs[] = {
+    { UNITS_DEGREES, "degrees" },
+    { UNITS_RADIANS, "radians" },
+    { UNITS_RADIANS, "rads" },
+    { 0, NULL }
+};
+
+#define LOWER_CHAR(ch) ((ch) < 'a' ? ((ch) + 'a' - 'A') : (ch))
+
+static pg_angleunits_t
+pg_parse_angle_unit_str(const char *unitstr)
+{
+    pg_angleunit_def_t *currentdef = pg_angleunit_defs;
+    pg_angleunit_def_t *lastmatch = NULL;
+
+    if (unitstr == NULL || unitstr[0] == '\0')
+        return UNITS_DEFAULT;
+
+    for (; currentdef->name; currentdef++) {
+        size_t currentchar;
+        int nomatch = 0;
+        for (currentchar = 0; unitstr[currentchar]; currentchar++) {
+            if (LOWER_CHAR(unitstr[currentchar]) !=
+                currentdef->name[currentchar]) {
+                nomatch = 1;
+                break;
+            }
+        }
+        if (!nomatch) {
+            if (lastmatch != NULL) {
+                if (currentdef->type != lastmatch->type) {
+                    PyErr_SetString(PyExc_ValueError,
+                                    "ambiguous units specified");
+                    return UNITS_UNKNOWN;
+                }
+            }
+            lastmatch = currentdef;
+        }
+    }
+
+    if (lastmatch == NULL) {
+        PyErr_SetString(PyExc_ValueError, "unknown units");
+        return UNITS_UNKNOWN;
+    }
+    return lastmatch->type;
+}
+
+static double
+pg_parse_angle(double angle, const char *unitstr)
+{
+    /* returns angle in radians (-1 on error) */
+    pg_angleunits_t units = pg_parse_angle_unit_str(unitstr);
+    switch (units) {
+        case UNITS_DEGREES:
+            angle = DEG2RAD(angle);
+            break;
+        case UNITS_RADIANS:
+            break;
+
+        case UNITS_UNKNOWN:
+            /* error */
+            return -1.;
+        default:
+            PyErr_SetString(
+                    PyExc_RuntimeError,
+                    "Please report this bug in _vector_parse_angle_arg to the "
+                    "pygame developers");
+            return -1.;
+    }
+    return angle;
+}
+
 static double
 _vector_parse_angle_arg(PyObject *args, PyObject *kw)
 {
-    /*  returns angle in radians
-        on error, returns -1.0 and PyErr_Occurred() != NULL
-        allows keyword argument 'rad' or 'angle', OR a single positional arg
-        (in degrees).
-    */
-
     double angle;
-    PyObject *radObj = NULL, *degObj = NULL;
-    PyObject *usedObj;
-
+    const char *unitstr = NULL;
     char *keywords[] = {
         "angle",
-        "rad",
+        "units",
         NULL
     };
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "|O$O", keywords,
-                                     &degObj, &radObj))
-        return -1.0;
-
-    if (degObj) {
-        if (radObj)
-            goto ERROR;
-        usedObj = degObj;
-    }
-    else if (radObj) {
-        usedObj = radObj;
-    }
-    else {
-        goto ERROR;
-    }
-
-    angle = PyFloat_AsDouble(usedObj);
-    if (angle == -1.0 && PyErr_Occurred()) {
-        return -1.0;
-    }
-    if (usedObj == degObj) {
-        return DEG2RAD(angle);
-    }
-    return angle;
-
-ERROR:
-
-    PyErr_SetString(PyExc_TypeError,
-                    "expected one angle argument or "
-                    "one keyword argument 'rad'");
-    return -1.0;
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "d|s", keywords,
+                                     &angle, &unitstr))
+        return -1.;
+    return pg_parse_angle(angle, unitstr);
 }
 
 static PyObject *
@@ -2506,102 +2556,16 @@ static double
 _vector3_parse_angle_axis_args(PyObject *args, PyObject *kw, PyObject **axisptr)
 {
     double angle;
-    const char *keystr;
-    PyObject *radObj = NULL, *degObj = NULL;
-    PyObject *usedObj;
-
-    PyObject *dictkey, *dictval;
-    Py_ssize_t dictpos = 0;
-
-    *axisptr = NULL;
-
-    if (!kw) {
-        goto PARSE_POSITIONAL;
-    }
-
-    while (PyDict_Next(kw, &dictpos,
-                       &dictkey, &dictval)) {
-        if (!Text_Check(dictkey)) {
-            PyErr_SetString(PyExc_TypeError,
-                            "keyword argument keys must be "
-                            "strings");
-            return -1.;
-        }
-#if PY3
-        keystr = PyUnicode_AsUTF8(dictkey);
-#else /* PY2 */
-        keystr = PyString_AsString(dictkey);
-#endif /* PY2 */
-        if (!keystr)
-            goto ERROR;
-
-        if (strcmp(keystr, "angle") == 0) {
-            degObj = dictval;
-        }
-        else if (strcmp(keystr, "rad") == 0) {
-            radObj = dictval;
-        }
-        else if (strcmp(keystr, "axis") == 0) {
-            *axisptr = dictval;
-        }
-        else {
-            goto ERROR;
-        }
-    }
-
-    if (!radObj) {
-        if (!degObj) {
-            if (*axisptr) {
-                if (PyTuple_Size(args) != 1)
-                    goto ERROR;
-            }
-            else {
-
-PARSE_POSITIONAL:
-
-                if (PyTuple_Size(args) != 2)
-                    goto ERROR;
-                *axisptr = PyTuple_GetItem(args, 1);
-                if (!*axisptr)
-                    goto ERROR;
-            }
-            degObj = PyTuple_GetItem(args, 0);
-            if (!degObj)
-                goto ERROR;
-        }
-        else {
-            if (!(*axisptr)) {
-                if (PyTuple_Size(args) != 1)
-                    goto ERROR;
-                *axisptr = PyTuple_GetItem(args, 0);
-                if (!*axisptr)
-                    goto ERROR;
-            }
-            else if (PyTuple_Size(args) != 0) {
-                goto ERROR;
-            }
-        }
-        usedObj = degObj;
-    }
-    else if (radObj) {
-        if (degObj)
-            goto ERROR;
-        usedObj = radObj;
-
-        if (!(*axisptr)) {
-            if (PyTuple_Size(args) != 1)
-                goto ERROR;
-            *axisptr = PyTuple_GetItem(args, 0);
-            if (!*axisptr)
-                goto ERROR;
-        }
-        else if (PyTuple_Size(args) != 0) {
-            goto ERROR;
-        }
-    }
-    else {
-        goto ERROR;
-    }
+    const char *unitstr = NULL;
+    char *keywords[] = {
+        "angle",
+        "axis",
+        "units",
+        NULL
+    };
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "dO|s", keywords,
+                                     &angle, axisptr, &unitstr))
+        return -1.;
 
     if (!(*axisptr))
         goto ERROR;
@@ -2610,14 +2574,7 @@ PARSE_POSITIONAL:
         return -1.;
     }
 
-    angle = PyFloat_AsDouble(usedObj);
-    if (angle == -1.0 && PyErr_Occurred()) {
-        return -1.;
-    }
-    if (usedObj == degObj) {
-        return DEG2RAD(angle);
-    }
-    return angle;
+    return pg_parse_angle(angle, unitstr);
 
 ERROR:
 
