@@ -46,6 +46,12 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define TWO_PI (2. * M_PI)
+
+#ifndef M_PI_2
+#define M_PI_2 (M_PI / 2.0)
+#endif /* M_PI_2 */
+
 #define VECTOR_EPSILON (1e-6)
 #define VECTOR_MAX_SIZE (4)
 #define STRING_BUF_SIZE (100)
@@ -245,9 +251,9 @@ static int
 _vector2_rotate_helper(double *dst_coords, const double *src_coords,
                        double angle, double epsilon);
 static PyObject *
-vector2_rotate(pgVector *self, PyObject *args);
+vector2_rotate(pgVector *self, PyObject *args, PyObject *kw);
 static PyObject *
-vector2_rotate_ip(pgVector *self, PyObject *args);
+vector2_rotate_ip(pgVector *self, PyObject *args, PyObject *kw);
 static PyObject *
 vector2_cross(pgVector *self, PyObject *other);
 static PyObject *
@@ -267,9 +273,9 @@ _vector3_rotate_helper(double *dst_coords, const double *src_coords,
                        const double *axis_coords, double angle,
                        double epsilon);
 static PyObject *
-vector3_rotate(pgVector *self, PyObject *args);
+vector3_rotate(pgVector *self, PyObject *args, PyObject *kw);
 static PyObject *
-vector3_rotate_ip(pgVector *self, PyObject *args);
+vector3_rotate_ip(pgVector *self, PyObject *args, PyObject *kw);
 static PyObject *
 vector3_cross(pgVector *self, PyObject *other);
 static PyObject *
@@ -1928,14 +1934,14 @@ static int
 _vector2_rotate_helper(double *dst_coords, const double *src_coords,
                        double angle, double epsilon)
 {
-    /* make sure angle is in range [0, 360) */
-    angle = fmod(angle, 360.);
+    /* make sure angle is in range [0, 2 PI) */
+    angle = fmod(angle, TWO_PI);
     if (angle < 0)
-        angle += 360.;
+        angle += TWO_PI;
 
     /* special-case rotation by 0, 90, 180 and 270 degrees */
-    if (fmod(angle + epsilon, 90.) < 2 * epsilon) {
-        switch ((int)((angle + epsilon) / 90)) {
+    if (fmod(angle + epsilon, M_PI_2) < 2 * epsilon) {
+        switch ((int)((angle + epsilon) / M_PI_2)) {
             case 0: /* 0 degrees */
             case 4: /* 360 degree (see issue 214) */
                 dst_coords[0] = src_coords[0];
@@ -1964,8 +1970,6 @@ _vector2_rotate_helper(double *dst_coords, const double *src_coords,
     }
     else {
         double sinValue, cosValue;
-
-        angle = DEG2RAD(angle);
         sinValue = sin(angle);
         cosValue = cos(angle);
 
@@ -1975,15 +1979,66 @@ _vector2_rotate_helper(double *dst_coords, const double *src_coords,
     return 1;
 }
 
+static double
+_vector_parse_angle_arg(PyObject *args, PyObject *kw)
+{
+    /*  returns angle in radians
+        on error, returns -1.0 and PyErr_Occurred() != NULL
+        allows keyword argument 'rad' or 'angle', OR a single positional arg
+        (in degrees).
+    */
+
+    double angle;
+    PyObject *radObj = NULL, *degObj = NULL;
+    PyObject *usedObj;
+
+    char *keywords[] = {
+        "angle",
+        "rad",
+        NULL
+    };
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "|O$O", keywords,
+                                     &degObj, &radObj))
+        return -1.0;
+
+    if (degObj) {
+        if (radObj)
+            goto ERROR;
+        usedObj = degObj;
+    }
+    else if (radObj) {
+        usedObj = radObj;
+    }
+    else {
+        goto ERROR;
+    }
+
+    angle = PyFloat_AsDouble(usedObj);
+    if (angle == -1.0 && PyErr_Occurred()) {
+        return -1.0;
+    }
+    if (usedObj == degObj) {
+        return DEG2RAD(angle);
+    }
+    return angle;
+
+ERROR:
+
+    PyErr_SetString(PyExc_TypeError,
+                    "expected one angle argument or "
+                    "one keyword argument 'rad'");
+    return -1.0;
+}
+
 static PyObject *
-vector2_rotate(pgVector *self, PyObject *args)
+vector2_rotate(pgVector *self, PyObject *args, PyObject *kw)
 {
     double angle;
     pgVector *ret;
 
-    if (!PyArg_ParseTuple(args, "d:rotate", &angle)) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred())
         return NULL;
-    }
 
     ret = (pgVector *)pgVector_NEW(self->dim);
     if (ret == NULL || !_vector2_rotate_helper(ret->coords, self->coords,
@@ -1995,14 +2050,14 @@ vector2_rotate(pgVector *self, PyObject *args)
 }
 
 static PyObject *
-vector2_rotate_ip(pgVector *self, PyObject *args)
+vector2_rotate_ip(pgVector *self, PyObject *args, PyObject *kw)
 {
     double angle;
     double tmp[2];
 
-    if (!PyArg_ParseTuple(args, "d:rotate_ip", &angle)) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred())
         return NULL;
-    }
 
     tmp[0] = self->coords[0];
     tmp[1] = self->coords[1];
@@ -2096,8 +2151,8 @@ static PyMethodDef vector2_methods[] = {
      DOC_VECTOR2MAGNITUDE},
     {"magnitude_squared", (PyCFunction)vector_length_squared, METH_NOARGS,
      DOC_VECTOR2MAGNITUDESQUARED},
-    {"rotate", (PyCFunction)vector2_rotate, METH_VARARGS, DOC_VECTOR2ROTATE},
-    {"rotate_ip", (PyCFunction)vector2_rotate_ip, METH_VARARGS,
+    {"rotate", (PyCFunction)vector2_rotate, METH_VARARGS | METH_KEYWORDS, DOC_VECTOR2ROTATE},
+    {"rotate_ip", (PyCFunction)vector2_rotate_ip, METH_VARARGS | METH_KEYWORDS,
      DOC_VECTOR2ROTATEIP},
     {"slerp", (PyCFunction)vector_slerp, METH_VARARGS, DOC_VECTOR2SLERP},
     {"lerp", (PyCFunction)vector_lerp, METH_VARARGS, DOC_VECTOR2LERP},
@@ -2342,10 +2397,10 @@ _vector3_rotate_helper(double *dst_coords, const double *src_coords,
     double axis[3];
     int i;
 
-    /* make sure angle is in range [0, 360) */
-    angle = fmod(angle, 360.);
+    /* make sure angle is in range [0, 2 PI) */
+    angle = fmod(angle, TWO_PI);
     if (angle < 0)
-        angle += 360.;
+        angle += TWO_PI;
 
     for (i = 0; i < 3; ++i) {
         axisLength2 += axis_coords[i] * axis_coords[i];
@@ -2366,8 +2421,8 @@ _vector3_rotate_helper(double *dst_coords, const double *src_coords,
     }
 
     /* special-case rotation by 0, 90, 180 and 270 degrees */
-    if (fmod(angle + epsilon, 90.) < 2 * epsilon) {
-        switch ((int)((angle + epsilon) / 90)) {
+    if (fmod(angle + epsilon, M_PI_2) < 2 * epsilon) {
+        switch ((int)((angle + epsilon) / M_PI_2)) {
             case 0: /* 0 degrees */
             case 4: /* 360 degrees (see issue 214) */
                 memcpy(dst_coords, src_coords, 3 * sizeof(src_coords[0]));
@@ -2421,7 +2476,6 @@ _vector3_rotate_helper(double *dst_coords, const double *src_coords,
         }
     }
     else {
-        angle = DEG2RAD(angle);
         sinValue = sin(angle);
         cosValue = cos(angle);
         cosComplement = 1 - cosValue;
@@ -2448,19 +2502,142 @@ _vector3_rotate_helper(double *dst_coords, const double *src_coords,
     return 1;
 }
 
+static double
+_vector3_parse_angle_axis_args(PyObject *args, PyObject *kw, PyObject **axisptr)
+{
+    double angle;
+    const char *keystr;
+    PyObject *radObj = NULL, *degObj = NULL;
+    PyObject *usedObj;
+
+    PyObject *dictkey, *dictval;
+    Py_ssize_t dictpos = 0;
+
+    *axisptr = NULL;
+
+    if (!kw) {
+        goto PARSE_POSITIONAL;
+    }
+
+    while (PyDict_Next(kw, &dictpos,
+                       &dictkey, &dictval)) {
+        if (!Text_Check(dictkey)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "keyword argument keys must be "
+                            "strings");
+            return -1.;
+        }
+#if PY3
+        keystr = PyUnicode_AsUTF8(dictkey);
+#else /* PY2 */
+        keystr = PyString_AsString(dictkey);
+#endif /* PY2 */
+        if (!keystr)
+            goto ERROR;
+
+        if (strcmp(keystr, "angle") == 0) {
+            degObj = dictval;
+        }
+        else if (strcmp(keystr, "rad") == 0) {
+            radObj = dictval;
+        }
+        else if (strcmp(keystr, "axis") == 0) {
+            *axisptr = dictval;
+        }
+        else {
+            goto ERROR;
+        }
+    }
+
+    if (!radObj) {
+        if (!degObj) {
+            if (*axisptr) {
+                if (PyTuple_Size(args) != 1)
+                    goto ERROR;
+            }
+            else {
+
+PARSE_POSITIONAL:
+
+                if (PyTuple_Size(args) != 2)
+                    goto ERROR;
+                *axisptr = PyTuple_GetItem(args, 1);
+                if (!*axisptr)
+                    goto ERROR;
+            }
+            degObj = PyTuple_GetItem(args, 0);
+            if (!degObj)
+                goto ERROR;
+        }
+        else {
+            if (!(*axisptr)) {
+                if (PyTuple_Size(args) != 1)
+                    goto ERROR;
+                *axisptr = PyTuple_GetItem(args, 0);
+                if (!*axisptr)
+                    goto ERROR;
+            }
+            else if (PyTuple_Size(args) != 0) {
+                goto ERROR;
+            }
+        }
+        usedObj = degObj;
+    }
+    else if (radObj) {
+        if (degObj)
+            goto ERROR;
+        usedObj = radObj;
+
+        if (!(*axisptr)) {
+            if (PyTuple_Size(args) != 1)
+                goto ERROR;
+            *axisptr = PyTuple_GetItem(args, 0);
+            if (!*axisptr)
+                goto ERROR;
+        }
+        else if (PyTuple_Size(args) != 0) {
+            goto ERROR;
+        }
+    }
+    else {
+        goto ERROR;
+    }
+
+    if (!(*axisptr))
+        goto ERROR;
+    if (!pgVectorCompatible_Check(*axisptr, 3)) {
+        PyErr_SetString(PyExc_TypeError, "axis must be a 3D Vector");
+        return -1.;
+    }
+
+    angle = PyFloat_AsDouble(usedObj);
+    if (angle == -1.0 && PyErr_Occurred()) {
+        return -1.;
+    }
+    if (usedObj == degObj) {
+        return DEG2RAD(angle);
+    }
+    return angle;
+
+ERROR:
+
+    PyErr_SetString(PyExc_TypeError,
+                    "expected one angle argument or "
+                    "one keyword argument 'rad', and "
+                    "an an axis vector");
+    return -1.;
+}
+
 static PyObject *
-vector3_rotate(pgVector *self, PyObject *args)
+vector3_rotate(pgVector *self, PyObject *args, PyObject *kw)
 {
     pgVector *ret;
     PyObject *axis;
     double axis_coords[3];
     double angle;
 
-    if (!PyArg_ParseTuple(args, "dO:rotate", &angle, &axis)) {
-        return NULL;
-    }
-    if (!pgVectorCompatible_Check(axis, self->dim)) {
-        PyErr_SetString(PyExc_TypeError, "axis must be a 3D Vector");
+    angle = _vector3_parse_angle_axis_args(args, kw, &axis);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     if (!PySequence_AsVectorCoords(axis, axis_coords, 3)) {
@@ -2478,18 +2655,15 @@ vector3_rotate(pgVector *self, PyObject *args)
 }
 
 static PyObject *
-vector3_rotate_ip(pgVector *self, PyObject *args)
+vector3_rotate_ip(pgVector *self, PyObject *args, PyObject *kw)
 {
     PyObject *axis;
     double axis_coords[3];
     double angle;
     double tmp[3];
 
-    if (!PyArg_ParseTuple(args, "dO:rotate_ip", &angle, &axis)) {
-        return NULL;
-    }
-    if (!pgVectorCompatible_Check(axis, self->dim)) {
-        PyErr_SetString(PyExc_TypeError, "axis must be a 3D Vector");
+    angle = _vector3_parse_angle_axis_args(args, kw, &axis);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     if (!PySequence_AsVectorCoords(axis, axis_coords, 3)) {
@@ -2505,14 +2679,14 @@ vector3_rotate_ip(pgVector *self, PyObject *args)
 }
 
 static PyObject *
-vector3_rotate_x(pgVector *self, PyObject *angleObject)
+vector3_rotate_x(pgVector *self, PyObject *args, PyObject *kw)
 {
     pgVector *ret;
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2529,14 +2703,14 @@ vector3_rotate_x(pgVector *self, PyObject *angleObject)
 }
 
 static PyObject *
-vector3_rotate_x_ip(pgVector *self, PyObject *angleObject)
+vector3_rotate_x_ip(pgVector *self, PyObject *args, PyObject *kw)
 {
     double tmp_coords[3];
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2549,14 +2723,14 @@ vector3_rotate_x_ip(pgVector *self, PyObject *angleObject)
 }
 
 static PyObject *
-vector3_rotate_y(pgVector *self, PyObject *angleObject)
+vector3_rotate_y(pgVector *self, PyObject *args, PyObject *kw)
 {
     pgVector *ret;
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2574,14 +2748,14 @@ vector3_rotate_y(pgVector *self, PyObject *angleObject)
 }
 
 static PyObject *
-vector3_rotate_y_ip(pgVector *self, PyObject *angleObject)
+vector3_rotate_y_ip(pgVector *self, PyObject *args, PyObject *kw)
 {
     double tmp_coords[3];
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2594,14 +2768,14 @@ vector3_rotate_y_ip(pgVector *self, PyObject *angleObject)
 }
 
 static PyObject *
-vector3_rotate_z(pgVector *self, PyObject *angleObject)
+vector3_rotate_z(pgVector *self, PyObject *args, PyObject *kw)
 {
     pgVector *ret;
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2619,14 +2793,14 @@ vector3_rotate_z(pgVector *self, PyObject *angleObject)
 }
 
 static PyObject *
-vector3_rotate_z_ip(pgVector *self, PyObject *angleObject)
+vector3_rotate_z_ip(pgVector *self, PyObject *args, PyObject *kw)
 {
     double tmp_coords[3];
     double sinValue, cosValue;
     double angle;
 
-    angle = DEG2RAD(PyFloat_AsDouble(angleObject));
-    if (PyErr_Occurred()) {
+    angle = _vector_parse_angle_arg(args, kw);
+    if (angle == -1.0 && PyErr_Occurred()) {
         return NULL;
     }
     sinValue = sin(angle);
@@ -2757,17 +2931,17 @@ static PyMethodDef vector3_methods[] = {
      DOC_VECTOR3MAGNITUDE},
     {"magnitude_squared", (PyCFunction)vector_length_squared, METH_NOARGS,
      DOC_VECTOR3MAGNITUDESQUARED},
-    {"rotate", (PyCFunction)vector3_rotate, METH_VARARGS, DOC_VECTOR3ROTATE},
-    {"rotate_ip", (PyCFunction)vector3_rotate_ip, METH_VARARGS,
+    {"rotate", (PyCFunction)vector3_rotate, METH_VARARGS | METH_KEYWORDS, DOC_VECTOR3ROTATE},
+    {"rotate_ip", (PyCFunction)vector3_rotate_ip, METH_VARARGS | METH_KEYWORDS,
      DOC_VECTOR3ROTATEIP},
-    {"rotate_x", (PyCFunction)vector3_rotate_x, METH_O, DOC_VECTOR3ROTATEX},
-    {"rotate_x_ip", (PyCFunction)vector3_rotate_x_ip, METH_O,
+    {"rotate_x", (PyCFunction)vector3_rotate_x, METH_VARARGS | METH_KEYWORDS, DOC_VECTOR3ROTATEX},
+    {"rotate_x_ip", (PyCFunction)vector3_rotate_x_ip, METH_VARARGS | METH_KEYWORDS,
      DOC_VECTOR3ROTATEXIP},
-    {"rotate_y", (PyCFunction)vector3_rotate_y, METH_O, DOC_VECTOR3ROTATEY},
-    {"rotate_y_ip", (PyCFunction)vector3_rotate_y_ip, METH_O,
+    {"rotate_y", (PyCFunction)vector3_rotate_y, METH_VARARGS | METH_KEYWORDS, DOC_VECTOR3ROTATEY},
+    {"rotate_y_ip", (PyCFunction)vector3_rotate_y_ip, METH_VARARGS | METH_KEYWORDS,
      DOC_VECTOR3ROTATEYIP},
-    {"rotate_z", (PyCFunction)vector3_rotate_z, METH_O, DOC_VECTOR3ROTATEZ},
-    {"rotate_z_ip", (PyCFunction)vector3_rotate_z_ip, METH_O,
+    {"rotate_z", (PyCFunction)vector3_rotate_z, METH_VARARGS | METH_KEYWORDS, DOC_VECTOR3ROTATEZ},
+    {"rotate_z_ip", (PyCFunction)vector3_rotate_z_ip, METH_VARARGS | METH_KEYWORDS,
      DOC_VECTOR3ROTATEZIP},
     {"slerp", (PyCFunction)vector_slerp, METH_VARARGS, DOC_VECTOR3SLERP},
     {"lerp", (PyCFunction)vector_lerp, METH_VARARGS, DOC_VECTOR3LERP},
